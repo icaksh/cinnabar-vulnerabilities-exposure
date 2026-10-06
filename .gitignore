@@ -1,4 +1,4 @@
 .env
-cve-service
-cve-service.exe
+/cve-service
+/cve-service.exe
 *.log
