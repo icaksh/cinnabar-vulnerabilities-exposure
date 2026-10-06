@@ -89,14 +89,14 @@ func (s *Syncer) Sync(ctx context.Context, full bool) (Result, error) {
 
 func (s *Syncer) buildParams(ctx context.Context, full bool, now time.Time) (QueryParams, bool, error) {
 	if full {
-		return QueryParams{LastModEndDate: &now}, true, nil
+		return QueryParams{}, true, nil
 	}
 	state, err := s.store.GetSyncState(ctx, SourceName)
 	if err != nil {
 		return QueryParams{}, false, err
 	}
 	if state.SyncCursor == nil {
-		return QueryParams{LastModEndDate: &now}, true, nil
+		return QueryParams{}, true, nil
 	}
 	start := state.SyncCursor.Add(-s.overlap)
 	minStart := now.Add(-s.maxAge)

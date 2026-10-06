@@ -154,6 +154,9 @@ func TestNoCursorBootstraps(t *testing.T) {
 	if fetcher.calls[0].LastModStartDate != nil {
 		t.Fatal("expected no LastModStartDate for bootstrap")
 	}
+	if fetcher.calls[0].LastModEndDate != nil {
+		t.Fatal("expected no LastModEndDate for bootstrap")
+	}
 }
 
 func TestFailedRequestMarksError(t *testing.T) {
