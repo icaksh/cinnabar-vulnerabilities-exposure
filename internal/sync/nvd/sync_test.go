@@ -12,8 +12,7 @@ import (
 type fakeStore struct {
 	state           *model.SyncState
 	vuls            map[string]model.Vulnerability
-	matches         map[string][]model.CPEMatch
-	upsertCalls     int
+	cfgs            map[string][]model.Configuration
 	replaceCalls    int
 	attempts        int
 	successes       int
@@ -39,10 +38,6 @@ func (f *fakeStore) MarkSyncError(_ context.Context, _ string, _ string) error {
 	return nil
 }
 func (f *fakeStore) UpsertVulnerabilities(_ context.Context, vuls []model.Vulnerability) error {
-	f.upsertCalls++
-	if f.failUpsertAfter > 0 && f.upsertCalls >= f.failUpsertAfter {
-		return errors.New("upsert failed")
-	}
 	if f.vuls == nil {
 		f.vuls = map[string]model.Vulnerability{}
 	}
@@ -51,16 +46,19 @@ func (f *fakeStore) UpsertVulnerabilities(_ context.Context, vuls []model.Vulner
 	}
 	return nil
 }
-func (f *fakeStore) ReplaceCPEMatches(_ context.Context, cveIDs []string, matches []model.CPEMatch) error {
+func (f *fakeStore) ReplaceConfigurations(_ context.Context, cveIDs []string, cfgs map[string][]model.Configuration) error {
 	f.replaceCalls++
-	if f.matches == nil {
-		f.matches = map[string][]model.CPEMatch{}
+	if f.failUpsertAfter > 0 && f.replaceCalls >= f.failUpsertAfter {
+		return errors.New("replace failed")
+	}
+	if f.cfgs == nil {
+		f.cfgs = map[string][]model.Configuration{}
 	}
 	for _, id := range cveIDs {
-		f.matches[id] = nil
+		f.cfgs[id] = nil
 	}
-	for _, m := range matches {
-		f.matches[m.CVEID] = append(f.matches[m.CVEID], m)
+	for cveID, cs := range cfgs {
+		f.cfgs[cveID] = cs
 	}
 	return nil
 }

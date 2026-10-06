@@ -61,6 +61,44 @@ func TestParseEscaped(t *testing.T) {
 	}
 }
 
+func TestEscapedWildcardNotWildcard(t *testing.T) {
+	c, err := Parse(`cpe:2.3:a:v:p:1.0:\*:*:*:*:*:*:*`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Escaped literal asterisk must not be collapsed into the ANY wildcard.
+	if c.Update == Any {
+		t.Fatalf("escaped literal * treated as wildcard: %+v", c)
+	}
+	if c.Update != `\*` {
+		t.Fatalf("expected preserved escape, got %q", c.Update)
+	}
+}
+
+func TestEscapedDashNotNA(t *testing.T) {
+	c, err := Parse(`cpe:2.3:a:v:p:1.0:\-:*:*:*:*:*:*:*`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.Update == NA {
+		t.Fatalf("escaped literal - treated as NA: %+v", c)
+	}
+	if c.Update != `\-` {
+		t.Fatalf("expected preserved escape, got %q", c.Update)
+	}
+}
+
+func TestWildcardAndNAComponentValues(t *testing.T) {
+	c, err := Parse("cpe:2.3:a:v:p:1.0:*:-:en:sd:tlinux:arm:other")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.Update != "*" || c.Edition != "-" || c.Language != "en" ||
+		c.SWEdition != "sd" || c.TargetSW != "tlinux" || c.TargetHW != "arm" || c.Other != "other" {
+		t.Fatalf("component parsing wrong: %+v", c)
+	}
+}
+
 func TestParseInvalid(t *testing.T) {
 	if _, err := Parse("not-a-cpe"); err == nil {
 		t.Fatal("expected error for invalid cpe")

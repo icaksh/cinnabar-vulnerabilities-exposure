@@ -106,6 +106,11 @@ func splitComponents(s string) []string {
 	escaped := false
 	for _, r := range s {
 		if escaped {
+			// Keep escapes on wildcard-significant literals (e.g. "\*", "\-")
+			// so they are not misinterpreted as the ANY/NA values later.
+			if r == rune(Any[0]) || r == '?' || r == rune(NA[0]) {
+				cur.WriteRune('\\')
+			}
 			cur.WriteRune(r)
 			escaped = false
 			continue
@@ -120,6 +125,9 @@ func splitComponents(s string) []string {
 			continue
 		}
 		cur.WriteRune(r)
+	}
+	if escaped {
+		cur.WriteRune('\\')
 	}
 	comps = append(comps, cur.String())
 	return comps

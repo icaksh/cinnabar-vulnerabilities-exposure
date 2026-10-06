@@ -1,6 +1,9 @@
 package nvd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -118,21 +121,21 @@ type reference struct {
 	Tags   []string `json:"tags"`
 }
 
-func Parse(resp Response) ([]model.Vulnerability, []model.CPEMatch) {
+func Parse(resp Response) ([]model.Vulnerability, []model.Configuration) {
 	vuls := make([]model.Vulnerability, 0, len(resp.Vulnerabilities))
-	var matches []model.CPEMatch
+	var configs []model.Configuration
 	for _, entry := range resp.Vulnerabilities {
-		v, ms := parseRecord(entry.CVE)
+		v, cfgs := parseRecord(entry.CVE)
 		if v.CVEID == "" {
 			continue
 		}
 		vuls = append(vuls, v)
-		matches = append(matches, ms...)
+		configs = append(configs, cfgs...)
 	}
-	return vuls, matches
+	return vuls, configs
 }
 
-func parseRecord(r cveRecord) (model.Vulnerability, []model.CPEMatch) {
+func parseRecord(r cveRecord) (model.Vulnerability, []model.Configuration) {
 	v := model.Vulnerability{
 		CVEID:       r.ID,
 		Description: englishDescription(r.Descriptions),
@@ -158,21 +161,59 @@ func parseRecord(r cveRecord) (model.Vulnerability, []model.CPEMatch) {
 		v.Severity = model.SeverityUnknown
 	}
 
-	var matches []model.CPEMatch
-	seen := make(map[string]bool)
-	for _, cfg := range r.Configurations {
-		for _, nd := range cfg.Nodes {
+	return v, parseConfigurations(r.ID, r.Configurations)
+}
+
+// parseConfigurations preserves the NVD applicability expression: each
+// configuration keeps its operator/negate and its nodes; each node keeps its
+// operator/negate and its CPE match list. Nodes are not flattened away.
+func parseConfigurations(cveID string, cfgs []configuration) []model.Configuration {
+	out := make([]model.Configuration, 0, len(cfgs))
+	for i, cfg := range cfgs {
+		if len(cfg.Nodes) == 0 {
+			continue
+		}
+		c := model.Configuration{
+			CVEID:    cveID,
+			Operator: defaultOperator(cfg.Operator, "OR"),
+			Negate:   cfg.Negate,
+			Position: i,
+		}
+		for j, nd := range cfg.Nodes {
+			if len(nd.CPEMatch) == 0 {
+				continue
+			}
+			n := model.ConfigurationNode{
+				Operator: defaultOperator(nd.Operator, "OR"),
+				Negate:   nd.Negate,
+				Position: j,
+			}
+			seen := make(map[string]bool, len(nd.CPEMatch))
 			for _, cm := range nd.CPEMatch {
-				m := buildCPEMatch(r.ID, cm)
-				if seen[m.Criteria] {
+				m := buildCPEMatch(cveID, cm)
+				if seen[m.MatchCriteriaID] {
 					continue
 				}
-				seen[m.Criteria] = true
-				matches = append(matches, m)
+				seen[m.MatchCriteriaID] = true
+				n.Matches = append(n.Matches, m)
 			}
+			c.Nodes = append(c.Nodes, n)
+		}
+		if len(c.Nodes) > 0 {
+			out = append(out, c)
 		}
 	}
-	return v, matches
+	return out
+}
+
+func defaultOperator(op, fallback string) string {
+	op = strings.TrimSpace(strings.ToUpper(op))
+	switch op {
+	case "AND", "OR":
+		return op
+	default:
+		return fallback
+	}
 }
 
 func selectCVSS(m metrics) (string, *float64, string, string) {
@@ -296,8 +337,37 @@ func buildCPEMatch(cveID string, cm cpeMatch) model.CPEMatch {
 		m.Vendor = c.VendorLower()
 		m.Product = c.ProductLower()
 		m.Version = c.Version
+		m.Update = c.Update
+		m.Edition = c.Edition
+		m.Language = c.Language
+		m.SWEdition = c.SWEdition
+		m.TargetSW = c.TargetSW
+		m.TargetHW = c.TargetHW
+		m.Other = c.Other
+	}
+	if m.MatchCriteriaID == "" {
+		m.MatchCriteriaID = syntheticMatchID(m)
 	}
 	return m
+}
+
+// syntheticMatchID provides a stable fallback identity when NVD omits
+// matchCriteriaId, so rules that differ only by range or context are not
+// silently merged.
+func syntheticMatchID(m model.CPEMatch) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s|%s|%s|%s|%s",
+		m.Criteria,
+		strVal(m.VersionStartIncl), strVal(m.VersionStartExcl),
+		strVal(m.VersionEndIncl), strVal(m.VersionEndExcl))
+	return "gen-" + hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+func strVal(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func strPtr(s string) *string {

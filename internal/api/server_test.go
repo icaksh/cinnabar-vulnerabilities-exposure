@@ -23,7 +23,9 @@ type fakeStore struct {
 	pingErr     error
 	vulns       map[string]*model.Vulnerability
 	cpeMatches  map[string][]model.CPEMatch
-	candidates  map[string][]model.CPEMatch
+	candidateCVEs map[string][]string
+	cfgs        map[string][]model.Configuration
+	legacy      map[string][]model.CPEMatch
 	searchItems []model.Vulnerability
 	searchTotal int64
 	statsCVE    int64
@@ -54,8 +56,14 @@ func (f *fakeStore) GetSyncState(_ context.Context, source string) (*model.SyncS
 	}
 	return &model.SyncState{Source: source, Status: "idle"}, nil
 }
-func (f *fakeStore) CandidateLookup(_ context.Context, part, vendor, product string) ([]model.CPEMatch, error) {
-	return f.candidates[vendor+"|"+product], nil
+func (f *fakeStore) CandidateCVEs(_ context.Context, _ string, vendor, product string) ([]string, error) {
+	return f.candidateCVEs[vendor+"|"+product], nil
+}
+func (f *fakeStore) GetConfigurations(_ context.Context, _ []string) (map[string][]model.Configuration, error) {
+	return f.cfgs, nil
+}
+func (f *fakeStore) GetLegacyMatches(_ context.Context, _ []string) (map[string][]model.CPEMatch, error) {
+	return f.legacy, nil
 }
 func (f *fakeStore) GetVulnerabilitiesByIDs(_ context.Context, ids []string) (map[string]model.Vulnerability, error) {
 	out := map[string]model.Vulnerability{}
@@ -213,10 +221,19 @@ func TestSearchInvalidSeverity(t *testing.T) {
 
 func TestResolveEndpoint(t *testing.T) {
 	store := &fakeStore{
-		candidates: map[string][]model.CPEMatch{
-			"v|p": {
-				{CVEID: "CVE-1", Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p", Version: "*", Vulnerable: true},
-			},
+		candidateCVEs: map[string][]string{"v|p": {"CVE-1"}},
+		cfgs: map[string][]model.Configuration{
+			"CVE-1": {{
+				CVEID: "CVE-1", Operator: "OR",
+				Nodes: []model.ConfigurationNode{{
+					Operator: "OR",
+					Matches: []model.CPEMatch{{
+						CVEID: "CVE-1", MatchCriteriaID: "M1",
+						Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p",
+						Version: "*", Update: "*", Edition: "*", Language: "*", Vulnerable: true,
+					}},
+				}},
+			}},
 		},
 		vulns: map[string]*model.Vulnerability{
 			"CVE-1": {CVEID: "CVE-1", Severity: model.SeverityHigh},
@@ -271,8 +288,19 @@ func TestBatchLimit(t *testing.T) {
 
 func TestBatchResolveEchoesClientRef(t *testing.T) {
 	store := &fakeStore{
-		candidates: map[string][]model.CPEMatch{
-			"v|p": {{CVEID: "CVE-1", Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p", Version: "*", Vulnerable: true}},
+		candidateCVEs: map[string][]string{"v|p": {"CVE-1"}},
+		cfgs: map[string][]model.Configuration{
+			"CVE-1": {{
+				CVEID: "CVE-1", Operator: "OR",
+				Nodes: []model.ConfigurationNode{{
+					Operator: "OR",
+					Matches: []model.CPEMatch{{
+						CVEID: "CVE-1", MatchCriteriaID: "M1",
+						Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p",
+						Version: "*", Update: "*", Edition: "*", Language: "*", Vulnerable: true,
+					}},
+				}},
+			}},
 		},
 		vulns: map[string]*model.Vulnerability{"CVE-1": {CVEID: "CVE-1"}},
 	}

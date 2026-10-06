@@ -15,7 +15,7 @@ type Store interface {
 	MarkSyncSuccess(ctx context.Context, source string, records int64, cursor *time.Time) error
 	MarkSyncError(ctx context.Context, source string, errMsg string) error
 	UpsertVulnerabilities(ctx context.Context, vuls []model.Vulnerability) error
-	ReplaceCPEMatches(ctx context.Context, cveIDs []string, matches []model.CPEMatch) error
+	ReplaceConfigurations(ctx context.Context, cveIDs []string, configs map[string][]model.Configuration) error
 }
 
 type Fetcher interface {
@@ -106,10 +106,10 @@ func (s *Syncer) buildParams(ctx context.Context, full bool, now time.Time) (Que
 	return QueryParams{LastModStartDate: &start, LastModEndDate: &now}, false, nil
 }
 
-func (s *Syncer) applyBatch(ctx context.Context, vuls []model.Vulnerability, matches []model.CPEMatch) error {
-	matchesByCVE := make(map[string][]model.CPEMatch, len(vuls))
-	for _, m := range matches {
-		matchesByCVE[m.CVEID] = append(matchesByCVE[m.CVEID], m)
+func (s *Syncer) applyBatch(ctx context.Context, vuls []model.Vulnerability, configs []model.Configuration) error {
+	configsByCVE := make(map[string][]model.Configuration, len(vuls))
+	for _, c := range configs {
+		configsByCVE[c.CVEID] = append(configsByCVE[c.CVEID], c)
 	}
 	size := s.batchSize
 	if size <= 0 {
@@ -125,12 +125,14 @@ func (s *Syncer) applyBatch(ctx context.Context, vuls []model.Vulnerability, mat
 			return err
 		}
 		cveIDs := make([]string, len(chunk))
-		var chunkMatches []model.CPEMatch
+		chunkConfigs := make(map[string][]model.Configuration, len(chunk))
 		for i, v := range chunk {
 			cveIDs[i] = v.CVEID
-			chunkMatches = append(chunkMatches, matchesByCVE[v.CVEID]...)
+			if cs := configsByCVE[v.CVEID]; len(cs) > 0 {
+				chunkConfigs[v.CVEID] = cs
+			}
 		}
-		if err := s.store.ReplaceCPEMatches(ctx, cveIDs, chunkMatches); err != nil {
+		if err := s.store.ReplaceConfigurations(ctx, cveIDs, chunkConfigs); err != nil {
 			return err
 		}
 	}

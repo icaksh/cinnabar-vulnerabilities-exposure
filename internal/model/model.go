@@ -52,6 +52,7 @@ type Reference struct {
 type CPEMatch struct {
 	ID               int64     `json:"-"`
 	CVEID            string    `json:"cve_id"`
+	NodeID           int64     `json:"node_id,omitempty"`
 	MatchCriteriaID  string    `json:"match_criteria_id,omitempty"`
 	Criteria         string    `json:"criteria"`
 	Part             string    `json:"part"`
@@ -62,9 +63,43 @@ type CPEMatch struct {
 	VersionStartExcl *string   `json:"version_start_excluding,omitempty"`
 	VersionEndIncl   *string   `json:"version_end_including,omitempty"`
 	VersionEndExcl   *string   `json:"version_end_excluding,omitempty"`
+	Update           string    `json:"update,omitempty"`
+	Edition          string    `json:"edition,omitempty"`
+	Language         string    `json:"language,omitempty"`
+	SWEdition        string    `json:"sw_edition,omitempty"`
+	TargetSW         string    `json:"target_sw,omitempty"`
+	TargetHW         string    `json:"target_hw,omitempty"`
+	Other            string    `json:"other,omitempty"`
 	Vulnerable       bool      `json:"vulnerable"`
 	CreatedAt        time.Time `json:"-"`
 	UpdatedAt        time.Time `json:"-"`
+}
+
+// Configuration is a top-level NVD applicability expression for a CVE.
+// Configurations of the same CVE are alternatives (OR). A configuration
+// combines its nodes using Operator (AND/OR) and may be negated.
+type Configuration struct {
+	ID        int64               `json:"-"`
+	CVEID     string              `json:"cve_id"`
+	Operator  string              `json:"operator"`
+	Negate    bool                `json:"negate"`
+	Position  int                 `json:"position"`
+	Nodes     []ConfigurationNode `json:"nodes"`
+	CreatedAt time.Time           `json:"-"`
+	UpdatedAt time.Time           `json:"-"`
+}
+
+// ConfigurationNode groups CPE conditions using Operator (AND/OR) and may
+// itself be negated. Children supports nested nodes (parent/child relation).
+type ConfigurationNode struct {
+	ID              int64     `json:"-"`
+	ConfigurationID int64     `json:"-"`
+	ParentNodeID    *int64    `json:"-"`
+	Operator        string    `json:"operator"`
+	Negate          bool      `json:"negate"`
+	Position        int       `json:"position"`
+	Matches         []CPEMatch `json:"cpe_matches,omitempty"`
+	Children        []ConfigurationNode `json:"children,omitempty"`
 }
 
 type SyncState struct {
