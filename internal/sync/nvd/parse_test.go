@@ -183,3 +183,21 @@ func TestExclusiveStartBoundary(t *testing.T) {
 		t.Fatalf("end incl = %v", m.VersionEndIncl)
 	}
 }
+
+func TestDuplicateCriteriaDeduped(t *testing.T) {
+	raw := `{"vulnerabilities": [{"cve": {
+		"id": "CVE-2020-0007",
+		"configurations": [
+			{"nodes": [{"cpeMatch": [
+				{"vulnerable": true, "criteria": "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", "versionEndExcluding": "2.0"}
+			]}]},
+			{"nodes": [{"cpeMatch": [
+				{"vulnerable": true, "criteria": "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", "versionEndExcluding": "2.0"}
+			]}]}
+		]
+	}}]}`
+	_, matches := parseWithMatches(t, raw)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 deduped match, got %d", len(matches))
+	}
+}

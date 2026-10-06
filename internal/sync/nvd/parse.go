@@ -159,10 +159,16 @@ func parseRecord(r cveRecord) (model.Vulnerability, []model.CPEMatch) {
 	}
 
 	var matches []model.CPEMatch
+	seen := make(map[string]bool)
 	for _, cfg := range r.Configurations {
 		for _, nd := range cfg.Nodes {
 			for _, cm := range nd.CPEMatch {
-				matches = append(matches, buildCPEMatch(r.ID, cm))
+				m := buildCPEMatch(r.ID, cm)
+				if seen[m.Criteria] {
+					continue
+				}
+				seen[m.Criteria] = true
+				matches = append(matches, m)
 			}
 		}
 	}
