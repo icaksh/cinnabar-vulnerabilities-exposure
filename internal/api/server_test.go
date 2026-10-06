@@ -215,7 +215,7 @@ func TestResolveEndpoint(t *testing.T) {
 	store := &fakeStore{
 		candidates: map[string][]model.CPEMatch{
 			"v|p": {
-				{CVEID: "CVE-1", Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p", Vulnerable: true},
+				{CVEID: "CVE-1", Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p", Version: "*", Vulnerable: true},
 			},
 		},
 		vulns: map[string]*model.Vulnerability{
@@ -272,7 +272,7 @@ func TestBatchLimit(t *testing.T) {
 func TestBatchResolveEchoesClientRef(t *testing.T) {
 	store := &fakeStore{
 		candidates: map[string][]model.CPEMatch{
-			"v|p": {{CVEID: "CVE-1", Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p", Vulnerable: true}},
+			"v|p": {{CVEID: "CVE-1", Criteria: "cpe:2.3:a:v:p:*:*:*:*:*:*:*:*", Part: "a", Vendor: "v", Product: "p", Version: "*", Vulnerable: true}},
 		},
 		vulns: map[string]*model.Vulnerability{"CVE-1": {CVEID: "CVE-1"}},
 	}

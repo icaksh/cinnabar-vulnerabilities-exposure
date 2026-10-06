@@ -156,16 +156,55 @@ func resolveVersion(c *cpe.CPE, reqVersion string) *string {
 
 func evaluate(m model.CPEMatch, ver *string) (model.MatchState, string, bool) {
 	rangeStr := rangeString(m)
+	cv := strings.TrimSpace(m.Version)
+
 	if ver == nil {
-		if hasBoundaries(m) {
+		switch {
+		case isConcreteVersion(cv):
 			return model.StateUncertain,
-				fmt.Sprintf("version unknown; cannot confirm affected range (%s)", rangeStr), false
+				fmt.Sprintf("no version detected; cannot confirm affected version %s (%s)", cv, rangeStr), false
+		case cv == cpe.Any:
+			if hasBoundaries(m) {
+				return model.StateUncertain,
+					fmt.Sprintf("version unknown; cannot confirm affected range (%s)", rangeStr), false
+			}
+			return model.StateMatched,
+				fmt.Sprintf("no version detected; criterion applies to all versions (%s)", rangeStr), false
+		case cv == cpe.NA:
+			return model.StateNotMatched,
+				fmt.Sprintf("criteria version is not applicable (NA); cannot match (%s)", rangeStr), true
+		default:
+			return model.StateUncertain,
+				fmt.Sprintf("criteria version is missing; cannot evaluate criterion (%s)", rangeStr), false
 		}
-		return model.StateMatched,
-			fmt.Sprintf("no version detected; criterion applies to all versions (%s)", rangeStr), false
 	}
 
 	v := *ver
+
+	switch {
+	case isConcreteVersion(cv):
+		if !versionsEqual(v, cv) {
+			return model.StateNotMatched,
+				fmt.Sprintf("vendor/product matched but version %s does not equal affected version %s", v, cv), true
+		}
+	case cv == cpe.Any:
+	case cv == cpe.NA:
+		return model.StateNotMatched,
+			fmt.Sprintf("vendor/product matched but criteria version %s is not applicable (NA); cannot match version %s", cv, v), true
+	default:
+		return model.StateUncertain,
+			fmt.Sprintf("criteria version is missing; cannot evaluate version %s against criterion (%s)", v, rangeStr), false
+	}
+
+	if !hasBoundaries(m) {
+		if isConcreteVersion(cv) {
+			return model.StateMatched,
+				fmt.Sprintf("vendor/product matched and version %s equals affected version %s", v, cv), true
+		}
+		return model.StateMatched,
+			fmt.Sprintf("vendor/product matched and criterion applies to all versions (%s)", rangeStr), true
+	}
+
 	certain := true
 
 	if m.VersionStartIncl != nil {
@@ -207,6 +246,14 @@ func evaluate(m model.CPEMatch, ver *string) (model.MatchState, string, bool) {
 	}
 	return model.StateMatched,
 		fmt.Sprintf("vendor/product matched and version %s is inside affected range (%s)", v, rangeStr), true
+}
+
+func isConcreteVersion(cv string) bool {
+	return cv != "" && cv != cpe.Any && cv != cpe.NA
+}
+
+func versionsEqual(a, b string) bool {
+	return strings.ToLower(strings.TrimSpace(a)) == strings.ToLower(strings.TrimSpace(b))
 }
 
 func hasBoundaries(m model.CPEMatch) bool {

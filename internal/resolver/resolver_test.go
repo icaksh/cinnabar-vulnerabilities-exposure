@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/icaksh/cinnabar-vulnerabilities-exposure/internal/cpe"
 	"github.com/icaksh/cinnabar-vulnerabilities-exposure/internal/model"
 )
 
@@ -35,13 +36,14 @@ func (f *fakeStore) GetVulnerabilitiesByIDs(_ context.Context, ids []string) (ma
 
 func sp(s string) *string { return &s }
 
-func rule(cveID, vendor, product, part string, startIncl, startExcl, endIncl, endExcl *string) model.CPEMatch {
+func rule(cveID, vendor, product, part, version string, startIncl, startExcl, endIncl, endExcl *string) model.CPEMatch {
 	return model.CPEMatch{
 		CVEID:            cveID,
-		Criteria:         "cpe:2.3:" + part + ":" + vendor + ":" + product + ":" + strOrStar(startIncl) + ":*:*:*:*:*:*:*",
+		Criteria:         "cpe:2.3:" + part + ":" + vendor + ":" + product + ":" + version + ":*:*:*:*:*:*:*",
 		Part:             part,
 		Vendor:           vendor,
 		Product:          product,
+		Version:          version,
 		VersionStartIncl: startIncl,
 		VersionStartExcl: startExcl,
 		VersionEndIncl:   endIncl,
@@ -50,11 +52,20 @@ func rule(cveID, vendor, product, part string, startIncl, startExcl, endIncl, en
 	}
 }
 
-func strOrStar(s *string) string {
-	if s == nil {
-		return "*"
+func ruleFromCriteria(cveID, criteria string) model.CPEMatch {
+	c, err := cpe.Parse(criteria)
+	if err != nil {
+		panic(err)
 	}
-	return *s
+	return model.CPEMatch{
+		CVEID:      cveID,
+		Criteria:   criteria,
+		Part:       c.PartLower(),
+		Vendor:     c.VendorLower(),
+		Product:    c.ProductLower(),
+		Version:    c.Version,
+		Vulnerable: true,
+	}
 }
 
 func newStore() *fakeStore {
@@ -67,7 +78,7 @@ func newStore() *fakeStore {
 func TestBoundaryRange(t *testing.T) {
 	s := newStore()
 	s.candidates["test|pkg"] = []model.CPEMatch{
-		rule("CVE-2020-0001", "test", "pkg", "a", sp("1.2.0"), nil, nil, sp("1.4.0")),
+		rule("CVE-2020-0001", "test", "pkg", "a", "*", sp("1.2.0"), nil, nil, sp("1.4.0")),
 	}
 	s.vulns["CVE-2020-0001"] = model.Vulnerability{CVEID: "CVE-2020-0001", Severity: model.SeverityHigh}
 
@@ -117,7 +128,7 @@ func findState(res *Result, cveID string) model.MatchState {
 func TestInclusiveExclusiveBoundaries(t *testing.T) {
 	s := newStore()
 	s.candidates["v|p"] = []model.CPEMatch{
-		rule("CVE-1", "v", "p", "a", sp("1.0"), nil, sp("2.0"), nil),
+		rule("CVE-1", "v", "p", "a", "*", sp("1.0"), nil, sp("2.0"), nil),
 	}
 	s.vulns["CVE-1"] = model.Vulnerability{CVEID: "CVE-1"}
 
@@ -140,7 +151,7 @@ func TestInclusiveExclusiveBoundaries(t *testing.T) {
 func TestDifferentVendorProduct(t *testing.T) {
 	s := newStore()
 	s.candidates["vendor|product"] = []model.CPEMatch{
-		rule("CVE-1", "vendor", "product", "a", nil, nil, nil, nil),
+		rule("CVE-1", "vendor", "product", "a", "*", nil, nil, nil, nil),
 	}
 	r := New(s)
 	res, err := r.Resolve(context.Background(), model.ResolveRequest{CPEs: []string{"cpe:/a:other:thing:1.0"}, Method: "probed", Confidence: 10})
@@ -155,7 +166,7 @@ func TestDifferentVendorProduct(t *testing.T) {
 func TestMissingVersionUnbounded(t *testing.T) {
 	s := newStore()
 	s.candidates["v|p"] = []model.CPEMatch{
-		rule("CVE-1", "v", "p", "a", nil, nil, nil, nil),
+		rule("CVE-1", "v", "p", "a", "*", nil, nil, nil, nil),
 	}
 	r := New(s)
 	res, err := r.Resolve(context.Background(), model.ResolveRequest{CPEs: []string{"cpe:/a:v:p"}, Method: "probed", Confidence: 10})
@@ -170,7 +181,7 @@ func TestMissingVersionUnbounded(t *testing.T) {
 func TestMissingVersionBounded(t *testing.T) {
 	s := newStore()
 	s.candidates["v|p"] = []model.CPEMatch{
-		rule("CVE-1", "v", "p", "a", sp("1.0"), nil, nil, nil),
+		rule("CVE-1", "v", "p", "a", "*", sp("1.0"), nil, nil, nil),
 	}
 	r := New(s)
 	res, err := r.Resolve(context.Background(), model.ResolveRequest{CPEs: []string{"cpe:/a:v:p"}, Method: "probed", Confidence: 10})
@@ -185,7 +196,7 @@ func TestMissingVersionBounded(t *testing.T) {
 func TestUncomparableVersion(t *testing.T) {
 	s := newStore()
 	s.candidates["v|p"] = []model.CPEMatch{
-		rule("CVE-1", "v", "p", "a", nil, nil, sp("1.0"), nil),
+		rule("CVE-1", "v", "p", "a", "*", nil, nil, sp("1.0"), nil),
 	}
 	r := New(s)
 	res, err := r.Resolve(context.Background(), model.ResolveRequest{CPEs: []string{"cpe:/a:v:p:1.0u1"}, Method: "probed", Confidence: 10})
@@ -200,7 +211,7 @@ func TestUncomparableVersion(t *testing.T) {
 func TestOpenSSH(t *testing.T) {
 	s := newStore()
 	s.candidates["openbsd|openssh"] = []model.CPEMatch{
-		rule("CVE-2024-6387", "openbsd", "openssh", "a", sp("9.0"), nil, nil, sp("9.7")),
+		rule("CVE-2024-6387", "openbsd", "openssh", "a", "*", sp("9.0"), nil, nil, sp("9.7")),
 	}
 	s.vulns["CVE-2024-6387"] = model.Vulnerability{CVEID: "CVE-2024-6387", Severity: model.SeverityHigh, CVSSScore: fp(8.1), IsKEV: true}
 
@@ -231,11 +242,11 @@ func fp(f float64) *float64 { return &f }
 func TestMultipleCPEAndDedup(t *testing.T) {
 	s := newStore()
 	s.candidates["v|one"] = []model.CPEMatch{
-		rule("CVE-1", "v", "one", "a", nil, nil, nil, nil),
+		rule("CVE-1", "v", "one", "a", "*", nil, nil, nil, nil),
 	}
 	s.candidates["v|two"] = []model.CPEMatch{
-		rule("CVE-2", "v", "two", "a", nil, nil, nil, nil),
-		rule("CVE-1", "v", "two", "a", nil, nil, nil, nil),
+		rule("CVE-2", "v", "two", "a", "*", nil, nil, nil, nil),
+		rule("CVE-1", "v", "two", "a", "*", nil, nil, nil, nil),
 	}
 	r := New(s)
 	res, err := r.Resolve(context.Background(), model.ResolveRequest{
@@ -262,7 +273,7 @@ func TestMultipleCPEAndDedup(t *testing.T) {
 func TestLowConfidenceInput(t *testing.T) {
 	s := newStore()
 	s.candidates["v|p"] = []model.CPEMatch{
-		rule("CVE-1", "v", "p", "a", nil, nil, nil, nil),
+		rule("CVE-1", "v", "p", "a", "*", nil, nil, nil, nil),
 	}
 	r := New(s)
 	res, err := r.Resolve(context.Background(), model.ResolveRequest{
@@ -309,7 +320,7 @@ func TestUnparseableCPE(t *testing.T) {
 func TestReasonContainsRange(t *testing.T) {
 	s := newStore()
 	s.candidates["v|p"] = []model.CPEMatch{
-		rule("CVE-1", "v", "p", "a", sp("1.2.0"), nil, nil, sp("1.4.0")),
+		rule("CVE-1", "v", "p", "a", "*", sp("1.2.0"), nil, nil, sp("1.4.0")),
 	}
 	r := New(s)
 	res, err := r.Resolve(context.Background(), model.ResolveRequest{CPEs: []string{"cpe:/a:v:p:1.3.0"}, Method: "probed", Confidence: 10})
@@ -321,5 +332,130 @@ func TestReasonContainsRange(t *testing.T) {
 	}
 	if !strings.Contains(res.Matches[0].Reason, "1.2.0") || !strings.Contains(res.Matches[0].Reason, "1.4.0") {
 		t.Fatalf("reason missing range: %s", res.Matches[0].Reason)
+	}
+}
+
+func resolveWith(t *testing.T, s *fakeStore, cpeStr, version string) *Result {
+	t.Helper()
+	r := New(s)
+	res, err := r.Resolve(context.Background(), model.ResolveRequest{
+		CPEs: []string{cpeStr}, Product: "", Version: version, Method: "probed", Confidence: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func TestConcreteCriteriaVersionMismatch(t *testing.T) {
+	s := newStore()
+	s.candidates["openbsd|openssh"] = []model.CPEMatch{
+		rule("CVE-1", "openbsd", "openssh", "a", "1.2.27", nil, nil, nil, nil),
+	}
+	res := resolveWith(t, s, "cpe:/a:openbsd:openssh:9.6p1", "9.6p1")
+	if len(res.Matches) != 0 {
+		t.Fatalf("expected no MATCHED, got %+v", res.Matches)
+	}
+	if got := findState(res, "CVE-1"); got != model.StateNotMatched {
+		t.Fatalf("state = %v, want NOT_MATCHED", got)
+	}
+}
+
+func TestConcreteCriteriaVersionEqual(t *testing.T) {
+	s := newStore()
+	s.candidates["openbsd|openssh"] = []model.CPEMatch{
+		rule("CVE-1", "openbsd", "openssh", "a", "9.6p1", nil, nil, nil, nil),
+	}
+	s.vulns["CVE-1"] = model.Vulnerability{CVEID: "CVE-1"}
+	res := resolveWith(t, s, "cpe:/a:openbsd:openssh:9.6p1", "9.6p1")
+	if len(res.Matches) != 1 {
+		t.Fatalf("expected 1 match, got %+v", res.Matches)
+	}
+	if got := findState(res, "CVE-1"); got != model.StateMatched {
+		t.Fatalf("state = %v, want MATCHED", got)
+	}
+}
+
+func TestWildcardCriteriaNoRange(t *testing.T) {
+	s := newStore()
+	s.candidates["v|p"] = []model.CPEMatch{
+		rule("CVE-1", "v", "p", "a", "*", nil, nil, nil, nil),
+	}
+	res := resolveWith(t, s, "cpe:/a:v:p:9.6p1", "9.6p1")
+	if got := findState(res, "CVE-1"); got != model.StateMatched {
+		t.Fatalf("state = %v, want MATCHED", got)
+	}
+}
+
+func TestWildcardCriteriaWithRangeInside(t *testing.T) {
+	s := newStore()
+	s.candidates["openbsd|openssh"] = []model.CPEMatch{
+		rule("CVE-1", "openbsd", "openssh", "a", "*", sp("9.0"), nil, nil, sp("9.7")),
+	}
+	res := resolveWith(t, s, "cpe:/a:openbsd:openssh:9.6p1", "9.6p1")
+	if got := findState(res, "CVE-1"); got != model.StateMatched {
+		t.Fatalf("state = %v, want MATCHED", got)
+	}
+}
+
+func TestWildcardCriteriaWithRangeOutside(t *testing.T) {
+	s := newStore()
+	s.candidates["openbsd|openssh"] = []model.CPEMatch{
+		rule("CVE-1", "openbsd", "openssh", "a", "*", sp("9.0"), nil, nil, sp("9.7")),
+	}
+	res := resolveWith(t, s, "cpe:/a:openbsd:openssh:9.8", "9.8")
+	if got := findState(res, "CVE-1"); got != model.StateNotMatched {
+		t.Fatalf("state = %v, want NOT_MATCHED", got)
+	}
+}
+
+func TestNACriteriaVersion(t *testing.T) {
+	s := newStore()
+	s.candidates["v|p"] = []model.CPEMatch{
+		rule("CVE-1", "v", "p", "a", "-", nil, nil, nil, nil),
+	}
+	res := resolveWith(t, s, "cpe:/a:v:p:9.6p1", "9.6p1")
+	if got := findState(res, "CVE-1"); got != model.StateNotMatched {
+		t.Fatalf("state = %v, want NOT_MATCHED", got)
+	}
+}
+
+func TestMissingCriteriaVersion(t *testing.T) {
+	s := newStore()
+	s.candidates["v|p"] = []model.CPEMatch{
+		rule("CVE-1", "v", "p", "a", "", nil, nil, nil, nil),
+	}
+	res := resolveWith(t, s, "cpe:/a:v:p:9.6p1", "9.6p1")
+	if len(res.Uncertain) != 1 {
+		t.Fatalf("expected 1 UNCERTAIN, got %+v", res.Uncertain)
+	}
+	if got := findState(res, "CVE-1"); got != model.StateUncertain {
+		t.Fatalf("state = %v, want UNCERTAIN", got)
+	}
+}
+
+func TestOpenSSHOldConcreteVersionRegression(t *testing.T) {
+	s := newStore()
+	s.candidates["openbsd|openssh"] = []model.CPEMatch{
+		ruleFromCriteria("CVE-2020-0001", "cpe:2.3:a:openbsd:openssh:1.2.27:*:*:*:*:*:*:*"),
+		ruleFromCriteria("CVE-2020-0002", "cpe:2.3:a:openbsd:openssh:4.5:*:*:*:*:*:*:*"),
+	}
+	s.vulns["CVE-2020-0001"] = model.Vulnerability{CVEID: "CVE-2020-0001"}
+	s.vulns["CVE-2020-0002"] = model.Vulnerability{CVEID: "CVE-2020-0002"}
+
+	r := New(s)
+	res, err := r.Resolve(context.Background(), model.ResolveRequest{
+		CPEs: []string{"cpe:/a:openbsd:openssh:9.6p1"}, Product: "OpenSSH", Version: "9.6p1", Method: "probed", Confidence: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Matches) != 0 {
+		t.Fatalf("CVEs with concrete old versions must NOT appear in Matches, got %+v", res.Matches)
+	}
+	for _, id := range []string{"CVE-2020-0001", "CVE-2020-0002"} {
+		if got := findState(res, id); got != model.StateNotMatched {
+			t.Fatalf("%s state = %v, want NOT_MATCHED", id, got)
+		}
 	}
 }
