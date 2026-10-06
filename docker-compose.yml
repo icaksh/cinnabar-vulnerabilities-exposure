@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cve}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cve}
+      POSTGRES_DB: ${POSTGRES_DB:-cve}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cve} -d ${POSTGRES_DB:-cve}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  cve-api:
+    build: .
+    image: cve-service:local
+    command: ["serve"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cve}:${POSTGRES_PASSWORD:-cve}@postgres:5432/${POSTGRES_DB:-cve}?sslmode=disable
+      CVE_HTTP_ADDR: ":8080"
+      CVE_API_KEYS: ${CVE_API_KEYS:-}
+      CVE_MAX_BATCH_ITEMS: ${CVE_MAX_BATCH_ITEMS:-1000}
+      CVE_MAX_PAGE_SIZE: ${CVE_MAX_PAGE_SIZE:-100}
+      CVE_LOG_LEVEL: ${CVE_LOG_LEVEL:-info}
+    ports:
+      - "${CVE_API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/cve-service", "health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  cve-sync:
+    build: .
+    image: cve-service:local
+    command: ["sync-worker"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cve}:${POSTGRES_PASSWORD:-cve}@postgres:5432/${POSTGRES_DB:-cve}?sslmode=disable
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      NVD_SYNC_INTERVAL: ${NVD_SYNC_INTERVAL:-30m}
+      KEV_SYNC_INTERVAL: ${KEV_SYNC_INTERVAL:-2h}
+      CVE_LOG_LEVEL: ${CVE_LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
