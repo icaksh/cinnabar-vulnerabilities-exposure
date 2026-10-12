@@ -3,10 +3,87 @@ package db
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/icaksh/cinnabar-vulnerabilities-exposure/internal/model"
 )
+
+func TestReplaceConfigurationsConcurrent(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping DB integration test")
+	}
+	ctx := context.Background()
+	d, err := New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := d.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	const cve = "ITEST-CONCURRENT-CONFIG"
+	_, _ = d.pool.Exec(ctx, `DELETE FROM vulnerabilities WHERE cve_id=$1`, cve)
+	defer func() { _, _ = d.pool.Exec(ctx, `DELETE FROM vulnerabilities WHERE cve_id=$1`, cve) }()
+	if _, err := d.pool.Exec(ctx, `INSERT INTO vulnerabilities (cve_id, description, severity) VALUES ($1,'itest','HIGH')`, cve); err != nil {
+		t.Fatal(err)
+	}
+	cfgs := map[string][]model.Configuration{cve: {{CVEID: cve, Operator: "OR", Position: 0}}}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); errCh <- d.ReplaceConfigurations(ctx, []string{cve}, cfgs) }()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Errorf("ReplaceConfigurations() error = %v", err)
+		}
+	}
+	var count int
+	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM vulnerability_configurations WHERE cve_id=$1`, cve).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("configuration count = %d, want 1", count)
+	}
+}
+
+func TestReplaceConfigurationsDuplicateIDs(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping DB integration test")
+	}
+	ctx := context.Background()
+	d, err := New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := d.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	const cve = "ITEST-DUPLICATE-CONFIG"
+	_, _ = d.pool.Exec(ctx, `DELETE FROM vulnerabilities WHERE cve_id=$1`, cve)
+	defer func() { _, _ = d.pool.Exec(ctx, `DELETE FROM vulnerabilities WHERE cve_id=$1`, cve) }()
+	if _, err := d.pool.Exec(ctx, `INSERT INTO vulnerabilities (cve_id, description, severity) VALUES ($1,'itest','HIGH')`, cve); err != nil {
+		t.Fatal(err)
+	}
+	cfg := model.Configuration{CVEID: cve, Operator: "OR", Position: 0}
+	if err := d.ReplaceConfigurations(ctx, []string{cve, cve}, map[string][]model.Configuration{cve: {cfg}}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM vulnerability_configurations WHERE cve_id=$1`, cve).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("configuration count = %d, want 1", count)
+	}
+}
 
 // TestConfigurationTreeRoundTrip exercises ReplaceConfigurations /
 // GetConfigurations / CandidateCVEs / GetLegacyMatches against a real

@@ -5,6 +5,8 @@ import (
 	"hash/fnv"
 )
 
+const ReplaceConfigurationsLockKey int64 = 0x6376655f63666731
+
 func SourceLockKey(source string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(source))

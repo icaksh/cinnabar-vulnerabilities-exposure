@@ -72,6 +72,16 @@ docker compose run --rm cve-sync sync nvd --full
 docker compose run --rm cve-sync sync kev
 ```
 
+The CLI refuses to start a source sync while the `cve-sync` worker or another
+CLI process holds that source's advisory lock. Stop the worker with
+`docker compose stop cve-sync`, or pass `--wait` to wait for the lock:
+
+```bash
+docker compose run --rm cve-sync sync nvd --wait
+docker compose run --rm cve-sync sync kev --wait
+docker compose run --rm cve-sync sync all --wait
+```
+
 > The first command can take a while — it's downloading a very large public list. Let it finish. You only run it once; after that, the service updates itself automatically.
 
 ### 6. Start everything

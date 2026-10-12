@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/icaksh/cinnabar-vulnerabilities-exposure/internal/model"
+	"github.com/jackc/pgx/v5"
 )
 
 var cpeMatchColumns = []string{
@@ -24,11 +24,15 @@ func (d *DB) ReplaceConfigurations(ctx context.Context, cveIDs []string, configs
 	if len(cveIDs) == 0 {
 		return nil
 	}
+	cveIDs = uniqueSorted(cveIDs)
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, ReplaceConfigurationsLockKey); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(ctx, `DELETE FROM vulnerability_cpe_matches WHERE cve_id = ANY($1)`, cveIDs); err != nil {
 		return err
@@ -49,6 +53,20 @@ func (d *DB) ReplaceConfigurations(ctx context.Context, cveIDs []string, configs
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func uniqueSorted(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	sort.Strings(unique)
+	return unique
 }
 
 func insertConfiguration(ctx context.Context, tx pgx.Tx, cfg model.Configuration) error {

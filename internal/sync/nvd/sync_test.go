@@ -3,11 +3,47 @@ package nvd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/icaksh/cinnabar-vulnerabilities-exposure/internal/model"
 )
+
+type duplicateRejectingStore struct{ fakeStore }
+
+func (f *duplicateRejectingStore) ReplaceConfigurations(ctx context.Context, ids []string, cfgs map[string][]model.Configuration) error {
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			return fmt.Errorf("duplicate CVE ID %s", id)
+		}
+		seen[id] = true
+		positions := map[int]bool{}
+		for _, cfg := range cfgs[id] {
+			if positions[cfg.Position] {
+				return fmt.Errorf("duplicate position for %s", id)
+			}
+			positions[cfg.Position] = true
+		}
+	}
+	return f.fakeStore.ReplaceConfigurations(ctx, ids, cfgs)
+}
+
+func TestApplyBatchNoDuplicatePositions(t *testing.T) {
+	store := &duplicateRejectingStore{}
+	fetcher := &fakeFetcher{pages: map[int]*Response{0: {
+		ResultsPerPage: 2, TotalResults: 2,
+		Vulnerabilities: []VulnerabilityEntry{
+			{CVE: cveRecord{ID: "CVE-2099-0001", LastModified: "2099-01-01T10:00:00.000", Configurations: []configuration{{Nodes: []node{{CPEMatch: []cpeMatch{{Criteria: "cpe:2.3:a:vendor:old:*:*:*:*:*:*:*:*", MatchCriteriaID: "OLD"}}}}}}}},
+			{CVE: cveRecord{ID: "CVE-2099-0001", LastModified: "2099-01-01T11:00:00.000", Configurations: []configuration{{Nodes: []node{{CPEMatch: []cpeMatch{{Criteria: "cpe:2.3:a:vendor:new:*:*:*:*:*:*:*:*", MatchCriteriaID: "NEW"}}}}}}}},
+		},
+	}}}
+	s := NewSyncer(store, fetcher, 10, time.Hour)
+	if _, err := s.Sync(context.Background(), true); err != nil {
+		t.Fatalf("Sync() error = %v, want duplicate records to be deduplicated", err)
+	}
+}
 
 type fakeStore struct {
 	state           *model.SyncState

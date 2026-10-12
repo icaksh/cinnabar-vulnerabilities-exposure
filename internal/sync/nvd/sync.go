@@ -2,6 +2,7 @@ package nvd
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/icaksh/cinnabar-vulnerabilities-exposure/internal/model"
@@ -69,8 +70,10 @@ func (s *Syncer) Sync(ctx context.Context, full bool) (Result, error) {
 		vuls, matches := Parse(*resp)
 		if len(vuls) > 0 {
 			if err := s.applyBatch(ctx, vuls, matches); err != nil {
-				s.store.MarkSyncError(ctx, SourceName, err.Error())
-				return Result{}, err
+				firstID, lastID := vuls[0].CVEID, vuls[len(vuls)-1].CVEID
+				wrapped := fmt.Errorf("apply page startIndex=%d (%d records, first=%s last=%s): %w", startIndex, len(vuls), firstID, lastID, err)
+				s.store.MarkSyncError(ctx, SourceName, wrapped.Error())
+				return Result{}, wrapped
 			}
 		}
 		total += int64(len(vuls))
@@ -107,6 +110,7 @@ func (s *Syncer) buildParams(ctx context.Context, full bool, now time.Time) (Que
 }
 
 func (s *Syncer) applyBatch(ctx context.Context, vuls []model.Vulnerability, configs []model.Configuration) error {
+	vuls = dedupeByCVE(vuls)
 	configsByCVE := make(map[string][]model.Configuration, len(vuls))
 	for _, c := range configs {
 		configsByCVE[c.CVEID] = append(configsByCVE[c.CVEID], c)
@@ -137,4 +141,22 @@ func (s *Syncer) applyBatch(ctx context.Context, vuls []model.Vulnerability, con
 		}
 	}
 	return nil
+}
+
+func dedupeByCVE(vuls []model.Vulnerability) []model.Vulnerability {
+	indexes := make(map[string]int, len(vuls))
+	unique := make([]model.Vulnerability, 0, len(vuls))
+	for _, v := range vuls {
+		if i, ok := indexes[v.CVEID]; ok {
+			previous := unique[i].ModifiedAt
+			if v.ModifiedAt == nil || (previous != nil && v.ModifiedAt.Before(*previous)) {
+				continue
+			}
+			unique[i] = v
+			continue
+		}
+		indexes[v.CVEID] = len(unique)
+		unique = append(unique, v)
+	}
+	return unique
 }

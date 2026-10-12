@@ -122,15 +122,32 @@ type reference struct {
 }
 
 func Parse(resp Response) ([]model.Vulnerability, []model.Configuration) {
-	vuls := make([]model.Vulnerability, 0, len(resp.Vulnerabilities))
-	var configs []model.Configuration
+	type parsedRecord struct {
+		v    model.Vulnerability
+		cfgs []model.Configuration
+	}
+	records := make([]parsedRecord, 0, len(resp.Vulnerabilities))
+	index := make(map[string]int, len(resp.Vulnerabilities))
 	for _, entry := range resp.Vulnerabilities {
 		v, cfgs := parseRecord(entry.CVE)
 		if v.CVEID == "" {
 			continue
 		}
-		vuls = append(vuls, v)
-		configs = append(configs, cfgs...)
+		if i, ok := index[v.CVEID]; ok {
+			if v.ModifiedAt == nil || (records[i].v.ModifiedAt != nil && v.ModifiedAt.Before(*records[i].v.ModifiedAt)) {
+				continue
+			}
+			records[i] = parsedRecord{v: v, cfgs: cfgs}
+			continue
+		}
+		index[v.CVEID] = len(records)
+		records = append(records, parsedRecord{v: v, cfgs: cfgs})
+	}
+	vuls := make([]model.Vulnerability, 0, len(records))
+	var configs []model.Configuration
+	for _, record := range records {
+		vuls = append(vuls, record.v)
+		configs = append(configs, record.cfgs...)
 	}
 	return vuls, configs
 }

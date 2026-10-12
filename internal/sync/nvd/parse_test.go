@@ -92,6 +92,20 @@ func TestParseBasic(t *testing.T) {
 	}
 }
 
+func TestParseDedupesDuplicateCVE(t *testing.T) {
+	raw := `{"vulnerabilities":[
+		{"cve":{"id":"CVE-2099-0001","lastModified":"2099-01-01T10:00:00.000","descriptions":[{"lang":"en","value":"old"}],"configurations":[{"nodes":[{"cpeMatch":[{"vulnerable":true,"criteria":"cpe:2.3:a:vendor:old:*:*:*:*:*:*:*:*","matchCriteriaId":"OLD"}]}]}]}},
+		{"cve":{"id":"CVE-2099-0001","lastModified":"2099-01-01T11:00:00.000","descriptions":[{"lang":"en","value":"new"}],"configurations":[{"nodes":[{"cpeMatch":[{"vulnerable":true,"criteria":"cpe:2.3:a:vendor:new1:*:*:*:*:*:*:*:*","matchCriteriaId":"NEW1"}]}]},{"nodes":[{"cpeMatch":[{"vulnerable":true,"criteria":"cpe:2.3:a:vendor:new2:*:*:*:*:*:*:*:*","matchCriteriaId":"NEW2"}]}]}]}}
+	]}`
+	vuls, cfgs := parseWithConfigs(t, raw)
+	if len(vuls) != 1 || vuls[0].Description != "new" {
+		t.Fatalf("vulnerabilities = %+v, want the latest duplicate only", vuls)
+	}
+	if len(cfgs) != 2 || cfgs[0].Position != 0 || cfgs[1].Position != 1 {
+		t.Fatalf("configurations = %+v, want latest record positions 0 and 1", cfgs)
+	}
+}
+
 func TestMissingCVSS(t *testing.T) {
 	raw := `{"vulnerabilities": [{"cve": {
 		"id": "CVE-2020-0002",
